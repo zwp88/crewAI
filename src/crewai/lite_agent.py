@@ -28,7 +28,7 @@ from pydantic import (
     InstanceOf,
     PrivateAttr,
     model_validator,
-    field_validator
+    field_validator,
 )
 
 from crewai.agents.agent_builder.base_agent import BaseAgent
@@ -62,19 +62,14 @@ from crewai.utilities.agent_utils import (
     render_text_description_and_args,
 )
 from crewai.utilities.converter import generate_model_description
-from crewai.utilities.events.agent_events import (
-    AgentLogsExecutionEvent,
+from crewai.events.types.logging_events import AgentLogsExecutionEvent
+from crewai.events.types.agent_events import (
     LiteAgentExecutionCompletedEvent,
     LiteAgentExecutionErrorEvent,
     LiteAgentExecutionStartedEvent,
 )
-from crewai.utilities.events.crewai_event_bus import crewai_event_bus
-from crewai.utilities.events.llm_events import (
-    LLMCallCompletedEvent,
-    LLMCallFailedEvent,
-    LLMCallStartedEvent,
-    LLMCallType,
-)
+from crewai.events.event_bus import crewai_event_bus
+
 from crewai.utilities.llm_utils import create_llm
 from crewai.utilities.printer import Printer
 from crewai.utilities.token_counter_callback import TokenCalcHandler
@@ -147,7 +142,7 @@ class LiteAgent(FlowTrackable, BaseModel):
         default=15, description="Maximum number of iterations for tool usage"
     )
     max_execution_time: Optional[int] = Field(
-        default=None, description="Maximum execution time in seconds"
+        default=None, description=". Maximum execution time in seconds"
     )
     respect_context_window: bool = Field(
         default=True,
@@ -210,7 +205,9 @@ class LiteAgent(FlowTrackable, BaseModel):
         """Set up the LLM and other components after initialization."""
         self.llm = create_llm(self.llm)
         if not isinstance(self.llm, BaseLLM):
-            raise ValueError(f"Expected LLM instance of type BaseLLM, got {type(self.llm).__name__}")
+            raise ValueError(
+                f"Expected LLM instance of type BaseLLM, got {type(self.llm).__name__}"
+            )
 
         # Initialize callbacks
         token_callback = TokenCalcHandler(token_cost_process=self._token_process)
@@ -233,7 +230,9 @@ class LiteAgent(FlowTrackable, BaseModel):
             from crewai.tasks.llm_guardrail import LLMGuardrail
 
             if not isinstance(self.llm, BaseLLM):
-                raise TypeError(f"Guardrail requires LLM instance of type BaseLLM, got {type(self.llm).__name__}")
+                raise TypeError(
+                    f"Guardrail requires LLM instance of type BaseLLM, got {type(self.llm).__name__}"
+                )
 
             self._guardrail = LLMGuardrail(description=self.guardrail, llm=self.llm)
 
@@ -515,17 +514,6 @@ class LiteAgent(FlowTrackable, BaseModel):
 
                 enforce_rpm_limit(self.request_within_rpm_limit)
 
-                # Emit LLM call started event
-                crewai_event_bus.emit(
-                    self,
-                    event=LLMCallStartedEvent(
-                        messages=self._messages,
-                        tools=None,
-                        callbacks=self._callbacks,
-                        from_agent=self,
-                    ),
-                )
-
                 try:
                     answer = get_llm_response(
                         llm=cast(LLM, self.llm),
@@ -535,22 +523,7 @@ class LiteAgent(FlowTrackable, BaseModel):
                         from_agent=self,
                     )
 
-                    # Emit LLM call completed event
-                    crewai_event_bus.emit(
-                        self,
-                        event=LLMCallCompletedEvent(
-                            messages=self._messages,
-                            response=answer,
-                            call_type=LLMCallType.LLM_CALL,
-                            from_agent=self,
-                        ),
-                    )
                 except Exception as e:
-                    # Emit LLM call failed event
-                    crewai_event_bus.emit(
-                        self,
-                        event=LLMCallFailedEvent(error=str(e), from_agent=self),
-                    )
                     raise e
 
                 formatted_answer = process_llm_response(answer, self.use_stop_words)
